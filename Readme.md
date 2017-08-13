@@ -18,6 +18,7 @@ define(function (module) {
 ```
 
 #2. API
+
 **init**
 > //todo
 
@@ -38,11 +39,14 @@ define(function (module) {
 
 
 #3. 嵌套依赖
+
 > //todo
 
 
 #4. 预加载
+
 > //todo
 
 #5. 别名/hash
+
 > //todo
