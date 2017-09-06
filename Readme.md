@@ -23,7 +23,7 @@ define(function (module) {
 
 > data-main 为总执行入口，也可以没有，直接写在main.html里。效果是一样的。
 
-#2. API
+# 2. API
 
 ###### init
 > 初始化方法，参数说明如下：
@@ -163,7 +163,7 @@ console.log(c.getInfo());   // {name: 'c', age: 12, type: "child"}
 ```
 
 
-#3. 嵌套依赖
+# 3. 嵌套依赖
 
 ###### 同步模式
 > 模块文件中可以直接使用require方法进行同步加载
@@ -286,7 +286,7 @@ test1 end
 test1.done:true test2.done:true
 ```
 
-#4. 预加载（preload）
+# 4. 预加载（preload）
 > 和hash/alias 一样，预加载在调用WeJs库时定义，可以为数组变量，或者以都逗号隔开的字符串
 
 > 示例
