@@ -10,4 +10,8 @@ define(function (module) {
 
     module.exports.done = true;
     document.body.innerHTML += '<br />test end';
+    // module.exports.x = 0;
+    // requires('demo', function(demo){
+    //     module.exports.x = demo.add(3, 4);
+    // });
 });

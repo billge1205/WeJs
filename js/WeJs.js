@@ -1,17 +1,34 @@
 /**
  * Created by billge on 2017/6/14.
  */
-;(function (root, d) {
+;(function (root, document) {
     "use strict";
-    //兼容无痕模式
-    var isPrivateMode;
-    try {
-        localStorage.setItem('isPrivateMode', '1');
-        localStorage.removeItem('isPrivateMode');
-        isPrivateMode = false;
-    } catch(e) {
-        isPrivateMode = true;
-    }
+    //JS 模拟$(document).ready()
+    (function () {
+        if (document.onReady){
+            return;
+        }
+        var ie = !!(window.attachEvent && !window.opera);
+        var wk = /webkit\/(\d+)/i.test(navigator.userAgent) && (RegExp.$1 < 525);
+        var fn = [];
+        var run = function () { for (var i = 0; i < fn.length; i++) fn[i](); };
+        document.onReady = function (f) {
+            if (!ie && !wk && document.addEventListener)
+                return document.addEventListener('DOMContentLoaded', f, false);
+            if (fn.push(f) > 1) return;
+            if (ie)
+                (function ff() {
+                    try { document.documentElement.doScroll('left'); run(); }
+                    catch (err) { //noinspection JSAnnotator
+                        setTimeout(ff(), 0); }
+                })();
+            else if (wk)
+                var t = setInterval(function () {
+                    if (/^(loaded|complete)$/.test(document.readyState))
+                        clearInterval(t), run();
+                }, 0);
+        };
+    })();
 
     function in_array(needle, haystack) {
         if(typeof needle === 'string' || typeof needle === 'number') {
@@ -54,10 +71,6 @@
         return o.toString.call(obj).replace(/\[object (\w+)\]/, '$1').toLowerCase();
     }
 
-    function isIE(){
-        return (window.ActiveXObject || "ActiveXObject" in window);
-    }
-
     function clone(obj){
         var copy;
         if (null === obj || "object" != typeof obj) return obj;
@@ -90,10 +103,6 @@
         var ctor = function(){superCtor.apply(this, arguments)};
         ctor.prototype = new superCtor();
         return ctor;
-    }
-
-    function getLocal(src) {
-        return isPrivateMode ? null : (localStorage[src] ? JSON.parse(localStorage[src]) : null);
     }
 
     function getValue(value, defaults) {
@@ -129,22 +138,9 @@
     };
 
     var ExportObj = function(src, ret){
-        var self = this;
         this.name = src;
         this.exports = {};
-        this.defines = 0;
         ret && (this.__tmp = ret);
-        this.requires = function(lists, callback){
-            self.defines++;
-            WeJs.requires(lists, function(){
-                callback.apply(this, arguments);
-                self.defines--;
-                if (self.defines === 0){
-                    WeJs.modules[self.name].loaded = true;
-                    WeJs.run(self.name);
-                }
-            });
-        };
     };
 
     var currentScript;
@@ -166,11 +162,13 @@
         return currentScript;
     };
 
+    var status = {loading: 0, loaded: 4, defined: 7, executing: 8,executed: 9, error: 99};
+
     if (isNone(root.WeJs)){
         var WeJs = {
-            version : '0.9.7',
-            jsHost: '', jsRoot: '',runList: [],modules: {},exports: {},events: {},
-            lists: [],alias: {},hashs: {},alert: true, preloads:[],
+            version : '0.10.2',
+            jsHost: '', jsRoot: '', modules: {},exports: {},events: {},
+            alias: {}, hashs: {}, lists:[], preloads: [],
             init: function(configs){
                 this.alias = configs.alias;
                 // 分析url
@@ -178,45 +176,46 @@
                 a.href = configs.path;
                 this.jsHost = a.hostname;
                 this.jsRoot = a.pathname;
-                this.hashs = configs.hashs ? configs.hashs : {};
+                // a.parentNode.removeChild(a);
+                for (var uri in configs.hashs){
+                    isString(uri) && (this.hashs[this.analyse(uri)] = configs.hashs[uri]);
+                }
+                if (isArr(configs.async)){
+                    for (var i=0,url; url = configs.async[i++];){
+                        this.load(url, false);
+                    }
+                }
+                return this;
             },
             ready: function(callback){
-                if (this.lists.length === 0){
-                    callback.apply(this, this.preloads);
-                } else {
-                    this.bind('onload', callback);
-                }
-            },
-            checkDomain: function(url){
-                var a = document.createElement('a');
-                a.href = url;
-                return a.hostname === window.location.host || a.hostname === this.jsHost;
+                var script = getCurrentScript();
+                this.bind('onload', callback);
+                this.preload(script.text ? script.text : callback);
+                this.run();
             },
             analyse: function (src) {
                 var exp = null;
+                if (!isNone(this.alias[src])){
+                    src = this.alias[src];
+                }
                 // 参数返回
                 if (isArr(src)){
                     exp = src[1];
                     src = src[0];
                 }
-                if (/^(http[s]?:)?\/\//.test(src)){
-
-                } else if (src.substring(0, 1) === '/') {
-                    src = '//' + this.jsHost + src;
-                } else {
+                if (!/^(http[s]?:)?\/\//.test(src) && src.substring(0, 2) !== './' && src.substring(0, 1) !== '/'){
                     src = '//' + this.jsHost + this.jsRoot + src;
                 }
                 var a = document.createElement('a');
                 a.href = src;
-                src = '//'+a.hostname+a.pathname;
-                if (exp){
-                    this.exports[src] = this.setExport(src, exp);
-                }
+                src = a.href;
+                // a.parentNode.removeChild(a);
+                isNone(this.exports[src]) && (this.exports[src] = this.setExport(src, exp));
                 return src;
             },
-            getPath: function(src, hash){
-                if (!isNone(hash)){
-                    src += ('.'+hash);
+            getPath: function(src){
+                if (!isNone(this.hashs[src])){
+                    src += ('.'+this.hashs[src]);
                 }
                 if (/\.js(\?|#)?/.test(src)){
                     path = src;
@@ -224,41 +223,6 @@
                     path = src + '.js';
                 }
                 return path;
-            },
-            getJs: function(url){
-                if (!this.checkDomain(url)){
-                    console.warn('跨域请求请使用requires方法:'+url);
-                }
-                var xmlHttp = new XMLHttpRequest();
-                try {
-                    xmlHttp.open("GET",url,false);
-                    if (getLocal(url) && getLocal(url).Last && getLocal(url).ETag){
-                        xmlHttp.setRequestHeader('If-Modified-Since', getLocal(url).Last);
-                        xmlHttp.setRequestHeader('If-None-Match', getLocal(url).ETag);
-                        xmlHttp.setRequestHeader('Accept', "*/*");
-                    }
-                    xmlHttp.send();
-                } catch (e){
-                    if (this.alert && isIE()){
-                        this.alert = false;
-                        alert('请IE用户设置 工具—>internet选项—>安全—>自定义级别—>其他 栏里面—>启用 跨域访问数据源—>启用，否者无法正常使用页面，请谅解');
-                    }
-                    throw new Error(e);
-                }
-                if (xmlHttp.status === 200){
-                    if (!isPrivateMode){
-                        localStorage[url] = JSON.stringify({
-                            ETag: xmlHttp.getResponseHeader('ETag'),
-                            Last: xmlHttp.getResponseHeader('Last-Modified'),
-                            text: xmlHttp.responseText
-                        });
-                    }
-                    return xmlHttp.responseText;
-                } else if (xmlHttp.status === 304){
-                    return getLocal(url).text;
-                } else {
-                    throw new Error(xmlHttp.status+':'+url);
-                }
             },
             bind: function(event, callback){
                 if (!this.events[event]){
@@ -289,6 +253,26 @@
                 }
                 return clone(exports.exports);
             },
+            exec: function (src) {
+                var module = this.modules[src];
+                if (module.status === status.defined && isFn(module.factory)){
+                    module.status = status.executing;
+                    module.factory.call(module.extend ? inherit(this.require(module.extend)) : this, WeJs.exports[src]);
+                    module.status = status.executed;
+                }
+            },
+            loaded: function(){
+                var ready = true;
+                for (var src in this.modules){
+                    var module = this.modules[src];
+                    if (module.status < status.loaded){
+                        ready = false;
+                    }
+                }
+                if (ready){
+                    this.trigger('onload', this.preloads);
+                }
+            },
             run: function(src){
                 var runs = [];
                 var news = [];
@@ -305,14 +289,20 @@
                         var exports = [];
                         var end = true;
                         for (var e=0,list; list = require['lists'][e++];){
-                            if (this.exports[list].defines > 0){
-                                end = false;
+                            var deps = this.modules[list].deps;
+                            for (var j=0, d; d= deps[j++];){
+                                if (isNone(this.modules[d]) || this.modules[d].status < status.loaded){
+                                    end = false;
+                                    break;
+                                }
+                            }
+                            if (!end){
+                                news.push(require);
                                 break;
                             }
-                            exports.push(this.getExport(list));
+                            exports.push(list);
                         }
                         if (!end){
-                            news.push(require);
                             continue;
                         }
                         runs.push({callback:require['callback'], exports: exports});
@@ -321,11 +311,13 @@
                     }
                 }
                 this.lists = news;
-                for (var j in runs){
-                    runs[j].callback.apply(this, runs[j].exports);
-                }
-                if (this.lists.length === 0){
-                    this.trigger('onload', this.preloads);
+                for (i in runs){
+                    var args = [];
+                    for (var k=0, arg; arg=runs[i].exports[k++];){
+                        this.exec(arg);
+                        args.push(this.getExport(arg));
+                    }
+                    runs[i].callback.apply(this, args);
                 }
             },
             define: function (callback) {
@@ -333,103 +325,95 @@
                 var script = getCurrentScript();
                 if (!script){throw new Error('no script loading')}
                 var src = script.getAttribute('data-src');
-                if (!src){throw new Error('script src error')}
-                callback.call(module ? inherit(module) : this, WeJs.exports[src]);
+                if (!src || isNone(this.modules[src])){throw new Error('script src error')}
+                this.preload(callback, src);
+                this.modules[src].status = status.defined;
+                this.modules[src].factory = callback;
+                if (module){
+                    this.modules[src].extend = module;
+                    this.modules[src].deps.push(this.analyse(module));
+                }
+            },
+            preload: function (cb, src) {
+                var text = cb;
+                if (isFn(cb)){
+                    text = cb.toString();
+                }
+                if(text.indexOf('require') === -1 && text.indexOf('import') === -1) {
+                    return;
+                }
+                var i,list,deps=[],p,d;
+                var lists = text.match(/([\s=;(){}:+\-*/,]|^)require[s]?\(\s*['"][\w_./:#?=&]+['"]\s*[),]/g);
+                if (lists){
+                    for (i = 0; list = lists[i++];){
+                        p = list.split(/['"]/)[1];
+                        this.load(p);
+                        deps.push(this.analyse(p));
+                    }
+                }
+                lists = text.match(/([\s=;(){}:+\-*/,]|^)import\([^)]+\)\.from\(\s*['"][\w_./:#?=&]+['"]\s*\)/g);
+                if (lists){
+                    for (i = 0; list = lists[i++];){
+                        var t = list.match(/\.from\(\s*['"][\w_./:#?=&]+['"]\s*\)/);
+                        p = t.match(/['"]/)[1];
+                        this.load(p);
+                        deps.push(this.analyse(p));
+                    }
+                }
+                if (src && !isNone(this.modules[src])){
+                    for (i=0,d; d= deps[i++];){
+                        if (in_array(d, this.modules[src].deps) === -1){
+                            this.modules[src].deps.push(d);
+                        }
+                    }
+                }
             },
             imports: function(name){
                 return new importObj(name);
             },
             extend : function(src){
-                var module = this.require(src);
+                if (isNone(this.modules[src])){
+                    this.load(src);
+                }
                 var self = this;
                 var extendObj = function () {
                     this.define = function (callback) {
-                        self.define(callback, module);
+                        self.define(callback, src);
                     };
                 };
                 return new extendObj();
             },
             require: function(src){
-                src = isNone(this.alias[src]) ? src : this.alias[src];
-                var hash = isNone(this.hashs[src]) ? undefined : this.hashs[src];
                 src = this.analyse(src);
                 var module = this.modules[src];
-                var path = this.getPath(src, hash);
-                if (!path){
-                    return;
+                if (!module || module.status < status.loaded){
+                    return null;
                 }
-                if (!module){
-                    this.modules[src] = {loaded: false};
-                    if (!this.exports[src]){
-                        this.exports[src] = this.setExport(src);
-                    }
-                    var hm = d.createElement("script");
-                    var text = this.getJs(path);
-                    if (!text){
-                        throw new Error(src + ' get no script text');
-                    }
-                    hm.id = 'javascript-'+src;
-                    hm.setAttribute('data-src', src);
-                    hm.text = text;
-                    hm.readyState = 'interactive';
-                    currentScript = hm;
-                    var s = d.getElementsByTagName("script")[0];
-                    s.parentNode.insertBefore(hm, s);
-
-                    hm.readyState = 'complete';
-                    this.modules[src].loaded = true;
-                    this.exports[src].defines === 0 && this.run(src);
-
-                } else if (module.loaded === false){
-                    console.warn(src, ' has been loading, cannot require again');
-                }
+                this.exec(src);
                 return this.getExport(src);
             },
             requires: function (lists, callback) {
                 callback = isFn(callback) ? callback : function(){};
                 lists = isArr(lists) ? lists : [lists];
-                var self = this;
                 var waited = [];
                 var newList = [];
                 for (var i=0,src; src = lists[i++];){
-                    src = isNone(this.alias[src]) ? src : this.alias[src];
-                    var hash = isNone(this.hashs[src]) ? undefined : this.hashs[src];
                     src = this.analyse(src);
                     newList.push(src);
+                    isNone(this.modules[src]) && this.load(src);
                     var module = this.modules[src];
-                    var path = this.getPath(src, hash);
-                    if (!path){
-                        return;
-                    }
-                    if (!module) {
-                        this.modules[src] = {loaded: false};
-                        if (!this.exports[src]){
-                            this.exports[src] = this.setExport(src);
-                        }
-                        var hm = d.createElement("script");
-                        hm.type = 'text/javascript';
-                        hm.id = 'javascript-'+src;
-                        hm.setAttribute('data-src', src);
-                        hm.src = path;
-                        hm.onload = hm.onreadystatechange = function(){
-                            if(!this.readyState || this.readyState === "loaded" || this.readyState === "complete") {
-                                this.onload = this.onreadystatechange = null;
-                                var src = this.getAttribute('data-src');
-                                self.modules[src].loaded = true;
-                                self.run(src);
+                    if (module.status < status.loaded){
+                        waited.push(src);
+                    } else {
+                        var deps = module.deps, end=true;
+                        for (var j=0,d; d=deps[j++];){
+                            if (this.modules[d].status < status.loaded){
+                                end=false;
+                                waited.push(src);
+                                break;
                             }
-                        };
-                        hm.onerror=function(){
-                            var src = this.getAttribute('data-src');
-                            console.log(src+': load error');
-                            self.modules[src].loaded = true;
-                            self.run(src);
-                        };
-                        var s = d.getElementsByTagName("script")[0];
-                        s.parentNode.insertBefore(hm, s);
-                        waited.push(src);
-                    } else if (module.loaded === false){
-                        waited.push(src);
+                        }
+                        end && this.exec(src);
                     }
                 }
                 lists = newList;
@@ -437,10 +421,52 @@
                     this.lists.push({lists:lists, waited:waited, callback:callback});
                 } else {
                     var exports = [];
-                    for (var e=0,list; list = lists[e++];){
+                    for (var e=0,list; list = newList[e++];){
                         exports.push(this.getExport(list));
                     }
                     callback.apply(this, exports);
+                }
+            },
+            load: function (src, async) {
+                isNone(async) && (async = true);
+                src = this.analyse(src);
+                var self = this;
+                var module = this.modules[src];
+                if (!module){
+                    async && (this.modules[src] = {status: status.loading, factory: null, extend: null, deps: []});
+                    var path = async  ? this.getPath(src) : src;
+                    var hm = document.createElement("script");
+                    hm.type = 'text/javascript';
+                    hm.id = 'javascript-'+src;
+                    hm.setAttribute('data-src', src);
+                    hm.setAttribute('data-async', (async ? "true" : ""));
+                    hm.src = path;
+                    hm.onload = hm.onreadystatechange = function(){
+                        if(!this.readyState || this.readyState === "loaded" || this.readyState === "complete") {
+                            this.onload = this.onreadystatechange = null;
+                            var src = this.getAttribute('data-src');
+                            var async = this.getAttribute('data-async');
+                            hm.parentNode && hm.parentNode.removeChild(hm);
+                            if (async){
+                                self.modules[src].status === status.loading && (self.modules[src].status = status.loaded);
+                                self.run(src);
+                                self.loaded();
+                            }
+                        }
+                    };
+                    hm.onerror=function(){
+                        var src = this.getAttribute('data-src');
+                        console.error(src+': load error');
+                        var async = this.getAttribute('data-async');
+                        hm.parentNode && hm.parentNode.removeChild(hm);
+                        if (async) {
+                            self.modules[src].status = status.error;
+                            self.run(src);
+                            self.loaded();
+                        }
+                    };
+                    var s = document.getElementsByTagName("script")[0];
+                    s.parentNode.insertBefore(hm, s);
                 }
             }
         };
@@ -468,16 +494,22 @@
     var path = getValue(current.getAttribute('data-path'), '/');
     var alias = getValue(current.getAttribute('data-alias'), {});
     var hashs = getValue(current.getAttribute('data-hashs'), {});
-    var main = getValue(current.getAttribute('data-main'));
+    var async = getValue(current.getAttribute('data-async'), []);
     var preload = getValue(current.getAttribute('data-preload'));
-    root.WeJs.init({path:path, alias: alias, hashs: hashs});
+    var main = getValue(current.getAttribute('data-main'));
+    root.WeJs.init({path:path, alias: alias, hashs: hashs, async: async});
     if (preload){
-        preload = isArr(preload) ? preload : preload.split(',');
-        root.requires(preload, function () {
-            root.WeJs.preloads = arguments;
-            main && root.requires(main);
+        isString(preload) && (preload = preload.split(','));
+        WeJs.requires(preload, function () {
+            WeJs.preloads = arguments;
         });
     }
+    main && WeJs.requires(main);
+    document.onReady(function () {
+        for (var i=0, script; script = document.scripts[i++];){
+            script.text && WeJs.preload(script.text);
+        }
+    });
 })(this, document);
 
 

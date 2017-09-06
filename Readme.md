@@ -15,13 +15,15 @@ define(function (module) {
 
 // index.js
 ```
-var main = require('main');
-main.sayHello();
+define(function (module) {
+    var main = require('main');
+    main.sayHello();
+});
 ```
 
 > data-main 为总执行入口，也可以没有，直接写在main.html里。效果是一样的。
 
-# 2. API
+#2. API
 
 ###### init
 > 初始化方法，参数说明如下：
@@ -55,7 +57,7 @@ WeJs.init({
 >WeJs会自动根据$hash/$alias变量名去查找，初始化
 
 ###### require
-> 同步加载js对象，对象内容会同步返回，参数为文件名
+> 加载js对象，对象内容会同步返回，参数为文件名
 
 > 示例：
 
@@ -64,14 +66,15 @@ WeJs.init({
     path: '/node/js/',
     hashs: {demo1: '34eb57', demo2: 'a60c93'},
     alias: {jquery: '//cdn.qq.com/js/jquery.3d4a22.js'}
+}).ready(function(){
+    var demo1 = require('demo1'); // /node/js/demo1.34eb57.js
+    var test = require('../test');  //  /node/test.js
+    var jquery = require('jquery');  //  //cdn.qq.com/js/jquery.3d4a22.js
 });
-var demo1 = require('demo1'); // /node/js/demo1.34eb57.js
-var test = require('../test');  //  /node/test.js
-var jquery = require('jquery');  //  //cdn.qq.com/js/jquery.3d4a22.js
+
 ```
 
-> 注意：如果该模块为首次加载时，不可使用跨域模块。跨域模块可使用requires异步加载或者先预加载（preload）
-
+> 遵循CMD规范，程序载入时会将factory预加载，当调用require方法时才会真正执行
 
 ###### requires
 > 异步加载模块，第一个参数为加载项，第二个参数为回调函数
@@ -88,7 +91,6 @@ requires(['demo1', 'demo2'], function(d1, d2){
     d2.dosomething();
 });
 ```
-
 
 ###### import
 > 从模块中加载指定项
@@ -161,7 +163,7 @@ console.log(c.getInfo());   // {name: 'c', age: 12, type: "child"}
 ```
 
 
-# 3. 嵌套依赖
+#3. 嵌套依赖
 
 ###### 同步模式
 > 模块文件中可以直接使用require方法进行同步加载
@@ -196,8 +198,7 @@ requires('demo2', function(demo)(){
 
 
 ###### 异步模式
-> 在模块中可以调用异步加载方式，需要注意的是，在使用requires异步加载方法时会等待异步加载完成后回调。
-> 但同步require方法时，如果该模块是首次加载，则只会返回异步加载之前的结果值，如需使用同步方式，请先预加载（preload）
+> 在模块中也可以调用异步加载方式
 
 > 示例
 
@@ -212,7 +213,7 @@ define(function (module) {
 ```
 define(function (module) {
     module.exports.x = 0;
-    module.requires('demo1', function(demo){
+    requires('demo1', function(demo){
         module.exports.x = demo.add(3, 4);
     });
 });
@@ -220,16 +221,17 @@ define(function (module) {
 // index.js
 ```
 var demo = require('demo2');
-console.log(demo.x);   // 0 未加载
+console.log(demo.x);   // 7
+```
 
-requires('demo2', function(demo)(){
-    console.log(demo.x);  // 7 已加载
-});
+> 在模块中调用requires方法和调用require方法，效果上是一致的，也可以如下写
 
-// 所有现有依赖都完成后会自动调用
-WeJs.ready(function(){
-    var demo = require('demo2');
-    console.log(demo.x);   // 7 已加载
+// demo2.js
+```
+define(function (module) {
+    module.exports.x = 0;
+    var demo = require('demo1');
+    module.exports.x = demo.add(3, 4);
 });
 ```
 
@@ -284,7 +286,7 @@ test1 end
 test1.done:true test2.done:true
 ```
 
-# 4. 预加载（preload）
+#4. 预加载（preload）
 > 和hash/alias 一样，预加载在调用WeJs库时定义，可以为数组变量，或者以都逗号隔开的字符串
 
 > 示例
@@ -311,4 +313,4 @@ WeJs.ready(function(demo1, demo2){
 });
 ```
 
-> 页面必然要用到的库，建议使用预加载，这样在同步require时，效率会非常的快。而且也使得require方法支持跨域引用
+> 页面必然要用到的库，建议使用预加载，这样在同步require时，效率会非常的快。
